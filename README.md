@@ -197,10 +197,4 @@ Feel free to open issues or pull requests for improvements, additional environme
 
 ---
 
-## 📄 License
-
-MIT © [Your Name](https://github.com/yourusername)
-
----
-
 **Happy automating!** 🎉
