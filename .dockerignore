@@ -1,6 +1,3 @@
-# Ignore everything by default
 *
-
-# Only allow the two files needed to build the image
 !Dockerfile
 !start.sh
