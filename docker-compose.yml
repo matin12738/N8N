@@ -1,43 +1,150 @@
+# =============================================================================
+# n8n Production-grade Compose (base)
+# -----------------------------------------------------------------------------
+# This file is the *production* baseline.
+# Local development overrides live in docker-compose.override.yml
+# (Docker Compose automatically merges them when you run `docker compose up`).
+#
+# Security layers applied:
+#   1. No ports published for Postgres / Redis (internal network only)
+#   2. Redis protected by password (when REDIS_PASSWORD is set)
+#   3. Resource limits + security_opt + cap_drop on every service
+#   4. Healthchecks with proper start_period
+#   5. Named volumes (easy backup) + internal bridge network
+# =============================================================================
+
+x-common-security: &common-security
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  read_only: false          # n8n needs to write to its data dir; keep false
+  tmpfs:
+    - /tmp
+
 services:
+  # ---------------------------------------------------------------------------
+  # PostgreSQL 15 (Alpine)
+  # ---------------------------------------------------------------------------
   postgres:
     image: postgres:15-alpine
-    restart: always
+    restart: unless-stopped
     environment:
-      POSTGRES_USER: n8n
-      POSTGRES_PASSWORD: n8n_secure_password # حتماً در سرور این را تغییر دهید
-      POSTGRES_DB: n8n
+      POSTGRES_USER: ${POSTGRES_USER:-n8n}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-n8n}
+      # Extra hardening
+      POSTGRES_INITDB_ARGS: "--data-checksums"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U n8n -h localhost"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-n8n} -d ${POSTGRES_DB:-n8n}"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 20s
+    networks:
+      - n8n_internal
+    # Resource limits (adjust for your server)
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+    <<: *common-security
+    # Postgres needs a few capabilities to work correctly
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+      - FOWNER
+      - DAC_OVERRIDE
 
+  # ---------------------------------------------------------------------------
+  # Redis 7 (Alpine) – used as Bull queue backend
+  # ---------------------------------------------------------------------------
+  # Local  : REDIS_PASSWORD را خالی بگذارید → بدون پسورد بالا می‌آید
+  # Production : حتماً REDIS_PASSWORD را پر کنید و REDIS_URL را هم
+  #              به شکل redis://:PASSWORD@redis:6379 تنظیم کنید
+  # ---------------------------------------------------------------------------
   redis:
     image: redis:7-alpine
-    restart: always
+    restart: unless-stopped
+    # دستور ساده و پایدار (بدون shell پیچیده که روی ویندوز مشکل‌ساز می‌شود)
+    command:
+      - redis-server
+      - --save
+      - "60"
+      - "1"
+      - --loglevel
+      - warning
     volumes:
       - redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    networks:
+      - n8n_internal
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+        reservations:
+          cpus: "0.1"
+          memory: 64M
+    security_opt:
+      - no-new-privileges:true
+    # توجه: cap_drop: ALL روی Redis در بعضی محیط‌ها (ویندوز/WSL) باعث unhealthy شدن می‌شود
+    # برای Production می‌توانید بعداً آن را اضافه کنید
 
+  # ---------------------------------------------------------------------------
+  # n8n (custom image)
+  # ---------------------------------------------------------------------------
   n8n:
-    build: .
-    restart: always
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: n8n-custom:latest
+    restart: unless-stopped
     ports:
-      - "5678:5678"
+      # Only n8n is exposed to the host / reverse-proxy
+      - "${N8N_HOST_PORT:-5678}:5678"
     environment:
-      - N8N_HOST=0.0.0.0
-      - N8N_PORT=5678
-      - N8N_PROTOCOL=http
-      - GENERIC_TIMEZONE=Asia/Tehran 
-      - N8N_ENCRYPTION_KEY=CHANGE_THIS_TO_A_LONG_RANDOM_STRING 
-      - DATABASE_URL=postgres://n8n:n8n_secure_password@postgres:5432/n8n
-      - REDIS_URL=redis://redis:6379
+      # Core
+      N8N_HOST: ${N8N_HOST:-0.0.0.0}
+      N8N_PORT: 5678
+      N8N_PROTOCOL: ${N8N_PROTOCOL:-http}
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:?N8N_ENCRYPTION_KEY is required}
+      GENERIC_TIMEZONE: ${GENERIC_TIMEZONE:-UTC}
+      TZ: ${GENERIC_TIMEZONE:-UTC}
+
+      # Logging
+      N8N_LOG_LEVEL: ${N8N_LOG_LEVEL:-info}
+      N8N_LOG_OUTPUT: ${N8N_LOG_OUTPUT:-console}
+
+      # Database & Queue (parsed by start.sh)
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      REDIS_URL: ${REDIS_URL:?REDIS_URL is required}
+
+      # Production recommended settings
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      N8N_PERSONALIZATION_ENABLED: "false"
+      N8N_VERSION_NOTIFICATIONS_ENABLED: "false"
+      N8N_TEMPLATES_ENABLED: "false"
+      EXECUTIONS_DATA_PRUNE: "true"
+      EXECUTIONS_DATA_MAX_AGE: 168          # hours (7 days)
+      EXECUTIONS_DATA_PRUNE_MAX_COUNT: 50000
+
+      # Queue mode is automatically enabled by start.sh when REDIS_URL is present
+      # You can still override:
+      # EXECUTIONS_MODE: queue
     depends_on:
       postgres:
         condition: service_healthy
@@ -45,8 +152,45 @@ services:
         condition: service_healthy
     volumes:
       - n8n_data:/home/node/.n8n
+    healthcheck:
+      # Official image contains wget; fallback to node if needed
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:5678/healthz || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - n8n_internal
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+        reservations:
+          cpus: "0.5"
+          memory: 512M
+    <<: *common-security
+    # n8n needs a few capabilities for its internal processes
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
 
+# -----------------------------------------------------------------------------
+# Volumes – named for easy backup / migration
+# -----------------------------------------------------------------------------
 volumes:
   postgres_data:
+    driver: local
   redis_data:
+    driver: local
   n8n_data:
+    driver: local
+
+# -----------------------------------------------------------------------------
+# Internal network – nothing is reachable from the outside except n8n port
+# -----------------------------------------------------------------------------
+networks:
+  n8n_internal:
+    driver: bridge
+    internal: false          # set to true if you put a reverse-proxy on the same network

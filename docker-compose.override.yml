@@ -1,0 +1,38 @@
+# =============================================================================
+# Local Development Overrides
+# -----------------------------------------------------------------------------
+# Docker Compose automatically loads this file when you run:
+#   docker compose up
+#
+# In production you should either:
+#   - delete / rename this file, or
+#   - use: docker compose -f docker-compose.yml up -d
+# =============================================================================
+
+services:
+  postgres:
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+
+  redis:
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 256M
+
+  n8n:
+    environment:
+      N8N_LOG_LEVEL: debug
+      N8N_LOG_OUTPUT: console
+      N8N_DIAGNOSTICS_ENABLED: "false"
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+    ports:
+      - "${N8N_HOST_PORT:-5678}:5678"

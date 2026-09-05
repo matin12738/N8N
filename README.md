@@ -1,18 +1,48 @@
-# 🚀 n8n Custom Docker (PostgreSQL & Redis Ready)
+# 🚀 n8n Production-Ready Docker Infrastructure
 
-تصویر داکر سفارشی‌شده برای [n8n](https://n8n.io) که پیکربندی PostgreSQL و Redis را از طریق متغیرهای محیطی `DATABASE_URL` و `REDIS_URL` به‌صورت خودکار و ایمن انجام می‌دهد.
+Fully hardened, dual-environment (Local + Production) stack for **n8n** with **PostgreSQL 15** and **Redis 7**.
 
-> ✅ **به‌روزرسانی امنیتی**: این نسخه با استفاده از مکانیسم رسمی `/docker-entrypoint.d/` و مدیریت صحیح کاربران (`USER root` موقت برای کپی و `USER node` برای اجرا) بازنویسی شده است تا بدون خطای دسترسی و با حداکثر امنیت اجرا شود.
+---
 
-## ✨ ویژگی‌ها
-- 🔄 **پیکربندی خودکار**: تبدیل هوشمند `DATABASE_URL` و `REDIS_URL` به متغیرهای مورد نیاز n8n.
-- 🛡️ **امنیت استاندارد**: اجرا با کاربر غیر-root (`node`) مطابق با بهترین شیوه‌های داکر.
-- 🧩 **سازگاری کامل**: بر پایه‌ی ایمیج رسمی `n8nio/n8n:latest` بدون تغییر در رفتار پیش‌فرض آن.
+## 🏗️ Architecture
 
-## 📦 شروع سریع
+```text
+                    ┌──────────────────────┐
+                    │  Reverse Proxy /     │
+                    │  Browser / Client    │
+                    └──────────┬───────────┘
+                               │ :5678 (only published port)
+                               ▼
+                    ┌──────────────────────┐
+                    │  n8n (custom image)  │
+                    │  • parses DATABASE_  │
+                    │    URL & REDIS_URL   │
+                    │  • queue mode        │
+                    └──────────┬───────────┘
+                               │
+               ┌───────────────┴───────────────┐
+               ▼                               ▼
+     ┌──────────────────┐           ┌──────────────────┐
+     │  PostgreSQL 15   │           │  Redis 7         │
+     │  (data store)    │           │  (Bull queue)    │
+     │  internal only   │           │  internal only   │
+     └──────────────────┘           └──────────────────┘
 
-### ۱. کلون و بیلد
-```bash
-git clone https://github.com/matin12738/N8N.git
-cd N8N
-docker compose build
+
+     cp .env.example .env
+# ویرایش .env (حداقل POSTGRES_PASSWORD و N8N_ENCRYPTION_KEY)
+
+# Local
+make up
+# یا
+docker compose up -d --build
+
+# Production
+make prod
+# یا
+docker compose -f docker-compose.yml up -d --build
+```
+
+## 📚 Documentation
+
+- [n8n Documentation](https://docs.n8n.io/)

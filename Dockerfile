@@ -1,12 +1,36 @@
+# =============================================================================
+# Custom n8n Image
+# -----------------------------------------------------------------------------
+# Base          : official n8nio/n8n (already non-root, hardened)
+# Extra layer   : inject a safe URL-parser script that runs before the
+#                 official entrypoint continues.
+#
+# Security layers:
+#   1. Build as root only for the COPY + chmod, then drop back to node
+#   2. Script is owned by node:node and not world-writable
+#   3. Official ENTRYPOINT is left untouched (defence in depth)
+# =============================================================================
+
 FROM n8nio/n8n:latest
 
-# فقط برای کپی فایل و تغییر دسترسی، موقتاً به root سوئیچ می‌کنیم
+# Temporary root only for file installation
 USER root
-COPY start.sh /docker-entrypoint.d/99-custom-env-parser.sh
-RUN chmod +x /docker-entrypoint.d/99-custom-env-parser.sh
 
-# بازگشت فوری به کاربر غیر-root برای امنیت و سازگاری با n8n
+# Place the script in the official docker-entrypoint.d directory.
+# Scripts are executed in alphabetical order; 99- guarantees it runs last.
+COPY start.sh /docker-entrypoint.d/99-custom-env-parser.sh
+
+# Make executable + lock ownership to the non-root user that will run the process
+RUN chmod 0755 /docker-entrypoint.d/99-custom-env-parser.sh \
+    && chown node:node /docker-entrypoint.d/99-custom-env-parser.sh
+
+# Drop privileges permanently
 USER node
 
+# Document the port (does not publish it)
 EXPOSE 5678
-# ENTRYPOINT را دستکاری نمی‌کنیم تا اسکریپت‌های رسمی n8n به درستی اجرا شوند
+
+# Do NOT override ENTRYPOINT or CMD.
+# The official image will:
+#   1. run every script under /docker-entrypoint.d/
+#   2. then start the real n8n process
