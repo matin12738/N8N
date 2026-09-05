@@ -4,7 +4,6 @@ A production‑ready Docker image for [n8n](https://n8n.io) that automatically c
 Perfect for self‑hosted workflow automation with scalable, persistent storage and queue management.
 
 [![Docker Pulls](https://img.shields.io/docker/pulls/yourusername/n8n-custom?style=flat-square)](https://hub.docker.com/r/yourusername/n8n-custom)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](LICENSE)
 
 ---
 
