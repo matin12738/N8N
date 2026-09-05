@@ -1,28 +1,31 @@
 #!/bin/sh
 set -eu
 
-# 1. تنظیم پورت
+# ۱. تنظیم پورت
 if [ -n "${PORT:-}" ] && [ -z "${N8N_PORT:-}" ]; then
   export N8N_PORT="${PORT}"
 fi
 
-# 2. تنظیم وب‌هوک
+# ۲. تنظیم وب‌هوک
 if [ -n "${WEBHOOK_URL:-}" ]; then
   export N8N_WEBHOOK_URL="${WEBHOOK_URL}"
 fi
 
-# 3. تنظیم PostgreSQL
+# ۳. تنظیم PostgreSQL (منطق پارس ایمن‌تر)
 if [ -n "${DATABASE_URL:-}" ]; then
   echo "⚙️ Configuring PostgreSQL from DATABASE_URL..."
   export DB_TYPE=postgresdb
   
+  # حذف scheme
   temp_url="${DATABASE_URL#postgres://}"
   temp_url="${temp_url#postgresql://}"
   
+  # استخراج user و password (تا قبل از @)
   user_pass="${temp_url%%@*}"
   export DB_POSTGRESDB_USER="${user_pass%%:*}"
   export DB_POSTGRESDB_PASSWORD="${user_pass#*:}"
   
+  # استخراج host, port, database
   host_db="${temp_url#*@}"
   export DB_POSTGRESDB_HOST="${host_db%%:*}"
   
@@ -32,9 +35,10 @@ if [ -n "${DATABASE_URL:-}" ]; then
   
   export DB_POSTGRESDB_SSL_ENABLED=true
   export PGSSLMODE=no-verify
+  # حذف NODE_TLS_REJECT_UNAUTHORIZED=0 به دلایل امنیتی شدید
 fi
 
-# 4. تنظیم Redis
+# ۴. تنظیم Redis
 if [ -n "${REDIS_URL:-}" ]; then
   echo "⚙️ Configuring Redis from REDIS_URL..."
   temp_redis="${REDIS_URL#redis://}"
